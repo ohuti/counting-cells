@@ -2,6 +2,7 @@ import os
 import math
 import cv2 as cv
 import numpy as np
+import pandas as pd
 
 
 DIR_PATH = os.environ['DIR_PATH']
@@ -60,27 +61,100 @@ def crop_outside_three_lines(img):
 
     return img[y1_threshold:gray_img.shape[0], x1_threshold:x2_threshold], gray_img[y1_threshold:gray_img.shape[0], x1_threshold:x2_threshold]
 
-def mask_subsections_and_count_cells(gray_img):
-    gray_copy = gray_img.copy()
-    blured_img = cv.GaussianBlur(gray_img, (7,7), 0)
+def detect_subsections(gray_img):
+    fixed_row_pos = math.floor(gray_img.shape[0]/3)
+    fixed_col_pos = math.floor(gray_img.shape[1]/3)
 
-    _, thresh = cv.threshold(blured_img, 115, 255, cv.THRESH_BINARY)
-    cv.imshow('thresh', thresh)
+    y_divisions = []
+    for row in range(gray_img.shape[0]):
+        for index in range(CHECK_PARALLEL_PIXELS):
+            if gray_img[row - 1][fixed_col_pos + index] >= WHITE_THRESHOLD and gray_img[row][fixed_col_pos + index] < WHITE_THRESHOLD:
+                if (row - 1) <= 10:
+                    continue
+                y_divisions.append(row)
+                break
+            if index == 0:
+                continue
+            elif gray_img[row - 1][fixed_col_pos - index] >= WHITE_THRESHOLD and gray_img[row][fixed_col_pos - index] < WHITE_THRESHOLD:
+                if (row - 1) <= 10:
+                    continue
+                y_divisions.append(row)
+                break
+    
+    x_divisions = []
+    for col in range(gray_img.shape[1]):
+        for index in range(CHECK_PARALLEL_PIXELS):
+            if gray_img[fixed_row_pos + index][col - 1] >= WHITE_THRESHOLD and gray_img[fixed_row_pos + index][col] < WHITE_THRESHOLD:
+                if (col - 1) <= 10:
+                    continue
+                x_divisions.append(col)
+                break
+            if index == 0:
+                continue
+            elif gray_img[fixed_row_pos - index][col - 1] >= WHITE_THRESHOLD and gray_img[fixed_row_pos - index][col] < WHITE_THRESHOLD:
+                if (col - 1) <= 10:
+                    continue
+                x_divisions.append(col)
+                break
 
-    contours, _ = cv.findContours(thresh, cv.RETR_TREE, cv.CHAIN_APPROX_NONE)
-    cv.drawContours(gray_copy, contours, -1, (0, 255, 0), 2)
-    cv.imshow('contours', gray_copy)
+    y_divisions.append(gray_img.shape[0])
+    x_divisions.append(gray_img.shape[1])
 
-    rounded_contours = []
-    for contour in contours:
-        approx = cv.approxPolyDP(contour, 0.01 * cv.arcLength(contour, True), True)
+    # if len(y_divisions) != len(x_divisions):
+    #     raise Exception('Found different number of rows and columns!')
+    
+    coordinates = []
+    for y_index in range(len(y_divisions)):
+        if y_index == 0:
+            y1 = 0
+            y2 = y_divisions[y_index]
+        else:
+            y1 = y_divisions[y_index - 1]
+            y2 = y_divisions[y_index]
+        
+        for x_index in range(len(x_divisions)):
+            if x_index == 0:
+                x1 = 0
+                x2 = x_divisions[x_index]
+            else:
+                x1 = x_divisions[x_index - 1]
+                x2 = x_divisions[x_index]
+        
+            coordinates.append({ 'x1': x1, 'x2': x2, 'y1': y1, 'y2': y2 })
+    return coordinates
 
-        if len(approx) < 3:
-            rounded_contours.append(contour)
+def apply_masks_and_count_cells(gray_img, subsection_coordinates):
+    selected_contours = []
+    for coordinate in subsection_coordinates:
+        x1 = coordinate.get('x1')
+        x2 = coordinate.get('x2')
+        y1 = coordinate.get('y1')
+        y2 = coordinate.get('y2')
 
-    return rounded_contours
+        blank = np.zeros(gray_img.shape[:2], np.uint8)
+        mask = cv.rectangle(blank, (x1 + 5, y1 + 5), (x2 - 8, y2 - 8), 255, -1)
+        masked = cv.bitwise_and(gray_img, mask)
+        masked = cv.GaussianBlur(masked, (5, 5), 0)
+        thresh = cv.adaptiveThreshold(masked, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY, 11, 5)
+
+        # dilation_kernel = np.ones((1, 1), np.uint8)
+        # dilated_thresh = cv.dilate(thresh, dilation_kernel, iterations=3)
+
+        contours, _ = cv.findContours(thresh, cv.RETR_TREE, cv.CHAIN_APPROX_NONE)
+        for contour in contours:
+            ctr_area = cv.contourArea(contour)
+            if ctr_area >= 15 and ctr_area <= 100:
+                selected_contours.append(contour)
+
+    return selected_contours
+
 
 def main():
+    result_dir = f'result/{DIR_PATH}'
+    if not os.path.exists(result_dir):
+        os.makedirs(result_dir)
+
+    data = []
     files = os.listdir(DIR_PATH)
     for file in files:
         path = os.path.join(DIR_PATH, file)
@@ -88,38 +162,23 @@ def main():
 
         print(f'handling file {path}')
         masked, masked_gray = crop_outside_three_lines(img)
-        contours = mask_subsections_and_count_cells(masked_gray)
-        print(f'Contours detected: {len(contours)}')
 
-        cv.drawContours(masked, contours, -1, (0, 255, 0), 5)
+        try:
+            subsection_coordinates = detect_subsections(masked_gray)
+            contours = apply_masks_and_count_cells(masked_gray, subsection_coordinates)
 
-        cv.imshow('result', masked)
-        cv.waitKey(0)
-        break
+            cv.drawContours(masked, contours, -1, (0, 255, 0), 1)
 
-    # cv2.imshow('gray', gray)
-
-    # gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # gray = cv2.GaussianBlur(gray, (7, 7), 0)
-    # _, thresh = cv2.threshold(gray, 160, 255, cv2.THRESH_BINARY_INV)
-
-    # dilation_kernel = np.ones((3, 3), np.uint8)
-    # eroded = cv2.erode(thresh, dilation_kernel, iterations=4)
-
-    # masked = cv2.bitwise_and(gray, gray, mask=eroded)
-
-    # blank = np.zeros(img.shape[:2], np.uint8)
-    # mask = cv2.rectangle(blank, (58, 35), (555, img.shape[0]), 255, -1)
-    # masked = cv2.bitwise_and(masked, masked, mask=mask)
-    
-    # cell_thresh = cv2.adaptiveThreshold(masked, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 11, 5)
-    
-    # contours, _ = cv2.findContours(cell_thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-    # contoured_img = img.copy()
-    # cv2.drawContours(contoured_img, contours, -1, (0, 255, 0), 1)
-    
-    # cv2.imshow('A037 - 20220711_113715.bmp', img)
-    # cv2.imshow('A037 - 20220711_113715.bmp with contours', contoured_img)
+            filename = f'result/{path}'.replace('//', '/')
+            cv.imwrite(filename, masked)
+            data.append({
+                'filename': filename,
+                'cells counted': len(contours)
+            })
+        except Exception as error:
+            print(error)
+    data_frame = pd.DataFrame(data)
+    data_frame.to_excel(f'{result_dir}/counts.xlsx', index=False)
 
 
 if __name__ == '__main__':
