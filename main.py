@@ -3,6 +3,7 @@ import math
 import cv2 as cv
 import numpy as np
 import pandas as pd
+from datetime import datetime
 
 
 DIR_PATH = os.environ['DIR_PATH']
@@ -99,9 +100,6 @@ def detect_subsections(gray_img):
 
     y_divisions.append(gray_img.shape[0])
     x_divisions.append(gray_img.shape[1])
-
-    # if len(y_divisions) != len(x_divisions):
-    #     raise Exception('Found different number of rows and columns!')
     
     coordinates = []
     for y_index in range(len(y_divisions)):
@@ -150,6 +148,7 @@ def apply_masks_and_count_cells(gray_img, subsection_coordinates):
 
 
 def main():
+    start = datetime.now()
     result_dir = f'result/{DIR_PATH}'
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
@@ -179,6 +178,8 @@ def main():
             print(error)
     data_frame = pd.DataFrame(data)
     data_frame.to_excel(f'{result_dir}/counts.xlsx', index=False)
+    end = datetime.now()
+    print(f'Process finished successfully. Elapsed time: {end - start}')
 
 
 if __name__ == '__main__':
