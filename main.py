@@ -1,150 +1,14 @@
 import os
-import math
 import cv2 as cv
-import numpy as np
 import pandas as pd
 from datetime import datetime
 
+from utils.get_contours import get_contours
+from utils.get_references import get_references
+from utils.mask_region_of_interest import mask_region_of_interest
+from utils.map_divisions_and_get_sub_section_coordinates import map_divisions_and_get_sub_section_coordinates
 
 DIR_PATH = os.environ['DIR_PATH']
-WHITE_THRESHOLD = int(os.environ['WHITE_THRESHOLD'])
-CHECK_PARALLEL_PIXELS = int(os.environ['CHECK_PARALLEL_PIXELS'])
-
-
-def crop_outside_three_lines(img):
-    gray_img = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-
-    col = math.floor(gray_img.shape[1]/4)
-    y1_threshold = None
-    for row in range(gray_img.shape[0]):
-        for index in range(CHECK_PARALLEL_PIXELS):
-            if gray_img[row][col + index] > WHITE_THRESHOLD:
-                y1_threshold = row
-                break
-            if index == 0:
-                continue
-            elif gray_img[row][col - index] > WHITE_THRESHOLD:
-                y1_threshold = row
-                break
-        if y1_threshold is not None and row - y1_threshold > 50:
-            break
-
-
-    row = math.floor(gray_img.shape[0]/2)
-    x1_threshold = None
-    for col in range(gray_img.shape[1]):
-        for index in range(CHECK_PARALLEL_PIXELS):
-            if gray_img[row + index][col] > WHITE_THRESHOLD:
-                x1_threshold = col
-                break
-            if index == 0:
-                continue
-            elif gray_img[row - index][col] > WHITE_THRESHOLD:
-                x1_threshold = col
-                break
-        if x1_threshold is not None and col - x1_threshold > 50:
-            break
-
-    x2_threshold = None
-    for col in range(gray_img.shape[1]):
-        true_col = gray_img.shape[1] - col - 1
-        for index in range(CHECK_PARALLEL_PIXELS):
-            if gray_img[row + index][true_col] > WHITE_THRESHOLD:
-                x2_threshold = true_col
-                break
-            if index == 0:
-                    continue
-            elif gray_img[row - index][true_col] > WHITE_THRESHOLD:
-                x2_threshold = true_col
-                break
-        if x2_threshold is not None and x2_threshold - true_col > 50:
-            break
-
-    return img[y1_threshold:gray_img.shape[0], x1_threshold:x2_threshold], gray_img[y1_threshold:gray_img.shape[0], x1_threshold:x2_threshold]
-
-def detect_subsections(gray_img):
-    fixed_row_pos = math.floor(gray_img.shape[0]/3)
-    fixed_col_pos = math.floor(gray_img.shape[1]/3)
-
-    y_divisions = []
-    for row in range(gray_img.shape[0]):
-        for index in range(CHECK_PARALLEL_PIXELS):
-            if gray_img[row - 1][fixed_col_pos + index] >= WHITE_THRESHOLD and gray_img[row][fixed_col_pos + index] < WHITE_THRESHOLD:
-                if (row - 1) <= 10:
-                    continue
-                y_divisions.append(row)
-                break
-            if index == 0:
-                continue
-            elif gray_img[row - 1][fixed_col_pos - index] >= WHITE_THRESHOLD and gray_img[row][fixed_col_pos - index] < WHITE_THRESHOLD:
-                if (row - 1) <= 10:
-                    continue
-                y_divisions.append(row)
-                break
-    
-    x_divisions = []
-    for col in range(gray_img.shape[1]):
-        for index in range(CHECK_PARALLEL_PIXELS):
-            if gray_img[fixed_row_pos + index][col - 1] >= WHITE_THRESHOLD and gray_img[fixed_row_pos + index][col] < WHITE_THRESHOLD:
-                if (col - 1) <= 10:
-                    continue
-                x_divisions.append(col)
-                break
-            if index == 0:
-                continue
-            elif gray_img[fixed_row_pos - index][col - 1] >= WHITE_THRESHOLD and gray_img[fixed_row_pos - index][col] < WHITE_THRESHOLD:
-                if (col - 1) <= 10:
-                    continue
-                x_divisions.append(col)
-                break
-
-    y_divisions.append(gray_img.shape[0])
-    x_divisions.append(gray_img.shape[1])
-    
-    coordinates = []
-    for y_index in range(len(y_divisions)):
-        if y_index == 0:
-            y1 = 0
-            y2 = y_divisions[y_index]
-        else:
-            y1 = y_divisions[y_index - 1]
-            y2 = y_divisions[y_index]
-        
-        for x_index in range(len(x_divisions)):
-            if x_index == 0:
-                x1 = 0
-                x2 = x_divisions[x_index]
-            else:
-                x1 = x_divisions[x_index - 1]
-                x2 = x_divisions[x_index]
-        
-            coordinates.append({ 'x1': x1, 'x2': x2, 'y1': y1, 'y2': y2 })
-    return coordinates
-
-def apply_masks_and_count_cells(gray_img, subsection_coordinates):
-    selected_contours = []
-    for coordinate in subsection_coordinates:
-        x1 = coordinate.get('x1')
-        x2 = coordinate.get('x2')
-        y1 = coordinate.get('y1')
-        y2 = coordinate.get('y2')
-
-        blank = np.zeros(gray_img.shape[:2], np.uint8)
-        mask = cv.rectangle(blank, (x1 + 5, y1 + 5), (x2 - 8, y2 - 8), 255, -1)
-        masked = cv.bitwise_and(gray_img, mask)
-        masked = cv.GaussianBlur(masked, (5, 5), 0)
-        thresh = cv.adaptiveThreshold(masked, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY, 11, 5)
-
-        # dilation_kernel = np.ones((1, 1), np.uint8)
-        # dilated_thresh = cv.dilate(thresh, dilation_kernel, iterations=3)
-
-        contours, _ = cv.findContours(thresh, cv.RETR_TREE, cv.CHAIN_APPROX_NONE)
-        for contour in contours:
-            ctr_area = cv.contourArea(contour)
-            if ctr_area >= 15 and ctr_area <= 100:
-                selected_contours.append(contour)
-
-    return selected_contours
 
 
 def main():
@@ -155,27 +19,29 @@ def main():
 
     data = []
     files = os.listdir(DIR_PATH)
+    # files = ['A045 - 20220711_113800.bmp']
     for file in files:
+        file_start = datetime.now()
         path = os.path.join(DIR_PATH, file)
-        img = cv.imread(path)
+        image = cv.imread(path)
 
-        print(f'handling file {path}')
-        masked, masked_gray = crop_outside_three_lines(img)
+        gray_img = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+        x_ref, y_ref = get_references(gray_img)
+        masked_gray = mask_region_of_interest(gray_img, x_ref, y_ref)
+        coordinates = map_divisions_and_get_sub_section_coordinates(masked_gray, x_ref, y_ref)
+        selected_contours = get_contours(masked_gray, coordinates)
+        contour_image = image.copy()
+        cv.drawContours(contour_image, selected_contours, -1, (0, 255, 0), 1)
 
-        try:
-            subsection_coordinates = detect_subsections(masked_gray)
-            contours = apply_masks_and_count_cells(masked_gray, subsection_coordinates)
+        filename = f'result/{path}'.replace('//', '/')
+        cv.imwrite(filename, contour_image)
+        data.append({
+            'filename': filename,
+            'cells counted': len(selected_contours)
+        })
+        file_end = datetime.now()
+        print(f'handling file {path}. Elapsed time {file_end - file_start}')
 
-            cv.drawContours(masked, contours, -1, (0, 255, 0), 1)
-
-            filename = f'result/{path}'.replace('//', '/')
-            cv.imwrite(filename, masked)
-            data.append({
-                'filename': filename,
-                'cells counted': len(contours)
-            })
-        except Exception as error:
-            print(error)
     data_frame = pd.DataFrame(data)
     data_frame.to_excel(f'{result_dir}/counts.xlsx', index=False)
     end = datetime.now()
