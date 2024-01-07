@@ -28,7 +28,7 @@ def find_white_pixel(gray_img, axis: str, fixed_pos: int, invert = False, offset
     last_white_pos = None
     white_found = False
     for pos in range(variable_axis):
-        if pos < 3:
+        if pos < 10:
             continue
 
         true_pos = pos if invert is False else variable_axis - pos - 1

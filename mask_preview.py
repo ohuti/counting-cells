@@ -13,6 +13,7 @@ def main():
         os.makedirs(result_dir)
 
     files = os.listdir(DIR_PATH)
+    # files = []
     for file in files:
         path = os.path.join(DIR_PATH, file)
         image = cv.imread(path)
@@ -25,7 +26,9 @@ def main():
         cv.line(masked_gray, (0, y_ref), (masked_gray.shape[1], y_ref), 0, 1)
         cv.putText(masked_gray, file, (10, 20), cv.FONT_HERSHEY_PLAIN, 1, 255, 1)
         cv.imshow('preview', masked_gray)
-        cv.waitKey(0)
+        key = cv.waitKey(0)
+        if key == 27:
+            break
 
 
 if __name__ == '__main__':

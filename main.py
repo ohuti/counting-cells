@@ -19,7 +19,7 @@ def main():
 
     data = []
     files = os.listdir(DIR_PATH)
-    # files = ['A045 - 20220711_113800.bmp']
+    # files = ['A003 - 20220718_123354.bmp']
     for file in files:
         file_start = datetime.now()
         path = os.path.join(DIR_PATH, file)
